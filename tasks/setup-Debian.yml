@@ -8,39 +8,51 @@
     name: dirmngr
     state: present
 
-- name: Add repository for PHP versions (Ubuntu).
-  apt_repository: repo='ppa:ondrej/php'
-  when: ansible_distribution == "Ubuntu"
-
-# Debian-specific tasks.
 - name: Add dependencies for PHP versions (Debian).
   apt:
     name:
       - apt-transport-https
       - ca-certificates
     state: present
-  when: ansible_distribution == "Debian"
 
-- name: Add Ondrej Sury's apt key (Debian).
-  apt_key:
-    url: https://packages.sury.org/php/apt.gpg
-    id: 15058500A0235D97F5D10063B188E2B695BD4743
-    state: present
-  when: ansible_distribution == "Debian"
+- name: Delete apt key from /etc/apt/trusted.gpg.
+  ansible.builtin.apt_key:
+    id: 14AA40EC0831756756D7F66C4F4EA0AAE5267A6C
+    keyring: /etc/apt/trusted.gpg
+    state: absent
 
-- name: Add Ondrej Sury's repo (Debian).
-  apt_repository:
-    repo: "deb https://packages.sury.org/php/ {{ ansible_distribution_release }} main"
-    state: present
-  register: php_ondrej_debian_repo
-  when: ansible_distribution == "Debian"
+- name: Delete unsigned PHP versions repository.
+  ansible.builtin.lineinfile:
+    path: "/etc/apt/sources.list.d/ppa_ondrej_php_{{ ansible_distribution_release }}.list"
+    regexp: '^deb http.*$'
+    state: absent
+    owner: root
+    group: root
+    mode: 0644
 
-- name: Update apt caches after repo is added (Debian).
-  apt: update_cache=true
-  when:
-    - php_ondrej_debian_repo.changed
-    - ansible_distribution == "Debian"
-  tags: ['skip_ansible_lint']
+- name: Ensure keyring directory exists.
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Add Ondrej Sury's PHP apt key.
+  ansible.builtin.get_url:
+    url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14AA40EC0831756756D7F66C4F4EA0AAE5267A6C
+    dest: /etc/apt/keyrings/ppa_ondrej_php.asc
+    owner: root
+    group: root
+    mode: 0644
+  register: download_output
+  retries: 5
+  until: download_output is not failed
+
+- name: Add Ondrej Sury's PHP repository.
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/ppa_ondrej_php.asc] https://ppa.launchpadcontent.net/ondrej/php/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} main"
+    filename: "ppa_ondrej_php_{{ ansible_distribution_release }}"
 
 - name: Purge PHP version packages (besides the currently chosen php_version).
   apt:
